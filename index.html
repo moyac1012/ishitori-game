@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>石取りゲーム（最後を取った方が負け）</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .stones {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: .75rem;
+      padding: .75rem;
+      min-height: 3.25rem;
+      line-height: 1.35;
+      word-break: break-all;
+    }
+    .log-box {
+      max-height: 280px;
+      overflow: auto;
+      background: #0b1220;
+      color: #e6edf3;
+      border-radius: .75rem;
+      padding: .75rem;
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .log-line { margin: 0; }
+    .log-dim { color: rgba(230, 237, 243, .72); }
+    .log-warn { color: #ffcc66; }
+    .log-lose { color: #ff7b72; }
+    .log-win { color: #7ee787; }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container py-4">
+    <div class="row g-4">
+      <div class="col-12">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <h1 class="h3 mb-0">石取りゲーム <span class="text-secondary h6">（最後の1つを取った方が負け）</span></h1>
+          <div class="d-flex gap-2">
+            <button id="btn-reset" class="btn btn-outline-secondary btn-sm" type="button">リセット</button>
+          </div>
+        </div>
+        <p class="text-secondary mt-2 mb-0">
+          1ターンで1〜M個まで石を取れます。残りが1個のときは必ず1個取り、取った側が負けになります。
+        </p>
+      </div>
+
+      <!-- Setup -->
+      <div class="col-12 col-lg-5">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white">
+            <div class="fw-semibold">初期設定</div>
+          </div>
+          <div class="card-body">
+            <form id="setup-form" class="row g-3">
+              <div class="col-6">
+                <label class="form-label">石の数 N</label>
+                <input id="inp-n" type="number" class="form-control" min="1" value="10" required>
+                <div class="form-text">1以上</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label">最大取得数 M</label>
+                <input id="inp-m" type="number" class="form-control" min="1" value="2" required>
+                <div class="form-text">1以上</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label">難易度</label>
+                <select id="sel-diff" class="form-select">
+                  <option value="easy">弱い</option>
+                  <option value="normal" selected>普通</option>
+                  <option value="hard">強い</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <label class="form-label">先行/後攻</label>
+                <div class="d-flex gap-3">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="turn" id="turn-player" value="player" checked>
+                    <label class="form-check-label" for="turn-player">あなたが先行</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="turn" id="turn-cpu" value="cpu">
+                    <label class="form-check-label" for="turn-cpu">CPUが先行</label>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 d-grid">
+                <button id="btn-start" class="btn btn-primary" type="submit">ゲーム開始</button>
+              </div>
+            </form>
+
+            <hr class="my-4">
+
+            <!-- <div class="small text-secondary">
+              <div class="fw-semibold mb-1">強い（最善手）の考え方</div>
+              <div>
+                残り石数を <span class="mono">k(M+1)+1</span> の形（例：M=2なら 1,4,7,10,...）に保つと、相手は必ず最後を取らされやすい（ミゼール型の必勝形）。
+              </div>
+            </div> -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Game -->
+      <div class="col-12 col-lg-7">
+        <div class="card shadow-sm">
+          <div class="card-header bg-white d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="fw-semibold">ゲーム</div>
+            <div>
+              <span class="badge text-bg-secondary me-2">状態</span>
+              <span id="badge-state" class="badge text-bg-light text-secondary border">未開始</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="d-flex justify-content-between align-items-end">
+                  <div>
+                    <div class="text-secondary small">残りの石</div>
+                    <div class="h4 mb-0"><span id="txt-remain">-</span></div>
+                  </div>
+                  <div class="text-end">
+                    <div class="text-secondary small">ルール</div>
+                    <div class="mono small mb-0">1〜M 個 / 最後を取ると負け</div>
+                  </div>
+                </div>
+                <div class="progress mt-2" role="progressbar" aria-label="remaining">
+                  <div id="bar-remain" class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div class="stones mono mt-2" id="stones-view">-</div>
+              </div>
+
+              <div class="col-12">
+                <div class="row g-2 align-items-end">
+                  <div class="col-12 col-md-6">
+                    <label class="form-label">あなたが取る数</label>
+                    <input id="inp-take" type="number" class="form-control" min="1" value="1" disabled>
+                    <div id="help-take" class="form-text">ゲーム開始後に入力できます。</div>
+                  </div>
+                  <div class="col-12 col-md-6 d-grid">
+                    <button id="btn-take" class="btn btn-success" type="button" disabled>取る</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="d-flex align-items-center justify-content-between">
+                  <div class="fw-semibold">ログ</div>
+                  <button id="btn-clear-log" class="btn btn-outline-secondary btn-sm" type="button" disabled>ログ消去</button>
+                </div>
+                <div class="log-box mt-2" id="log"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer bg-white text-secondary small">
+            入力制約：1〜M、ただし残りが1のときは強制的に1を取って負けになります。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  /** ====== State ====== **/
+  const state = {
+    started: false,
+    finished: false,
+    n0: 0,
+    m: 0,
+    remain: 0,
+    diff: "normal", // easy | normal | hard
+    turn: "player", // player | cpu
+  };
+
+  /** ====== DOM ====== **/
+  const $ = (id) => document.getElementById(id);
+
+  const setupForm = $("setup-form");
+  const inpN = $("inp-n");
+  const inpM = $("inp-m");
+  const selDiff = $("sel-diff");
+  const turnPlayer = $("turn-player");
+  const turnCpu = $("turn-cpu");
+
+  const badgeState = $("badge-state");
+  const txtRemain = $("txt-remain");
+  const barRemain = $("bar-remain");
+  const stonesView = $("stones-view");
+
+  const inpTake = $("inp-take");
+  const btnTake = $("btn-take");
+  const btnStart = $("btn-start");
+  const btnReset = $("btn-reset");
+  const btnClearLog = $("btn-clear-log");
+  const logBox = $("log");
+
+  /** ====== Helpers ====== **/
+  function logLine(html, cls = "log-line") {
+    const p = document.createElement("p");
+    p.className = cls;
+    p.innerHTML = html;
+    logBox.appendChild(p);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function setBadge(text, kind) {
+    // kind: light|primary|success|warning|danger|secondary
+    badgeState.className = "badge";
+    if (kind === "light") badgeState.classList.add("text-bg-light", "text-secondary", "border");
+    else badgeState.classList.add(`text-bg-${kind}`);
+    badgeState.textContent = text;
+  }
+
+  function clampInt(x, lo, hi) {
+    const v = Number(x);
+    if (!Number.isFinite(v)) return null;
+    const t = Math.trunc(v);
+    if (t < lo || t > hi) return null;
+    return t;
+  }
+
+  function render() {
+    txtRemain.textContent = state.started ? String(state.remain) : "-";
+
+    const pct = state.started && state.n0 > 0 ? Math.max(0, Math.min(100, (state.remain / state.n0) * 100)) : 0;
+    barRemain.style.width = `${pct}%`;
+
+    stonesView.textContent = state.started ? renderStones(state.remain) : "-";
+
+    const canPlay = state.started && !state.finished && state.turn === "player";
+    inpTake.disabled = !canPlay;
+    btnTake.disabled = !canPlay;
+
+    btnClearLog.disabled = !state.started;
+  }
+
+  function renderStones(remain) {
+    // 視認用：● を最大60個、以降は省略
+    const maxDots = 60;
+    if (remain <= 0) return "(なし)";
+    if (remain <= maxDots) return "●".repeat(remain);
+    return "●".repeat(maxDots) + ` … (+${remain - maxDots})`;
+  }
+
+  function legalMaxTake(remain) {
+    // ルール上は1..M。ただし remain=1 のときは 1 を取るしかない（そして負け）。
+    // remain>1 のときは「最後を取って負け」なので、取れる最大は min(M, remain-1) にしても良いが、
+    // 実際の説明では「最大M個」としか書いていないので、remain<=M のときに全部取って負けも許可する。
+    // ここでは「全部取るのもルール上は可能で、その瞬間に負け」として扱う。
+    return Math.min(state.m, remain);
+  }
+
+  function isGameOverByTaking(remainAfterMove) {
+    // 0 になった＝最後を取った（その手番が負け）として終了
+    return remainAfterMove === 0;
+  }
+
+  function finish(winner) {
+    state.finished = true;
+    state.started = true;
+
+    if (winner === "player") {
+      setBadge("あなたの勝ち", "success");
+      logLine(`<span class="log-win">結果：あなたの勝ち</span>`, "log-line");
+    } else {
+      setBadge("CPUの勝ち", "danger");
+      logLine(`<span class="log-lose">結果：CPUの勝ち</span>`, "log-line");
+    }
+    render();
+  }
+
+  /** ====== Strategy ====== **/
+  function losingPosition(remain, m) {
+    // ミゼール型（最後を取ると負け）の減算ゲーム：残り 1 が負け
+    // 負けの形：remain ≡ 1 (mod m+1)
+    return (remain % (m + 1)) === 1;
+  }
+
+  function bestMove(remain, m) {
+    // 最善手：相手に remain ≡ 1 (mod m+1) を渡す
+    // ただし、すでに負け形（remain ≡ 1）なら勝てる手は無いので、適当（1〜min(m,remain)）に取る
+    const maxTake = Math.min(m, remain);
+    if (remain === 1) return 1; // 強制負け手
+    const r = (remain - 1) % (m + 1); // 0..m
+    // r==0 なら今が負け形なので「必勝手なし」
+    if (r === 0) {
+      // 負け形では、ランダムでもよいが、取り過ぎて即負けしないように（ただし全部取って負けも許容）
+      return Math.min(1, maxTake) || 1;
+    }
+    return Math.max(1, Math.min(r, maxTake));
+  }
+
+  function randInt(lo, hi) {
+    return lo + Math.floor(Math.random() * (hi - lo + 1));
+  }
+
+  function cpuMoveEasy(remain) {
+    const maxTake = legalMaxTake(remain);
+    if (remain === 1) return 1;
+    // 基本ランダム（勝てる手があっても選ばないことが多い）
+    // ただし「即勝ち（相手に1を渡す）」が見えるときでも一定確率で外す
+    const canLeave1 = (remain - 1) >= 1 && (remain - 1) <= state.m; // 1〜M 取って1残し可能
+    if (canLeave1 && Math.random() < 0.25) return remain - 1; // 25%だけ確実に狙う
+    return randInt(1, maxTake);
+  }
+
+  function cpuMoveNormal(remain) {
+    const maxTake = legalMaxTake(remain);
+    if (remain === 1) return 1;
+
+    // 基本ランダム。ただし勝ち筋（理論上の有利手）があるときは狙う確率を上げる。
+    const optimal = bestMove(remain, state.m);
+
+    // 「すぐ勝てる（1を渡せる）」は強めに狙う
+    const isImmediateWin = (remain - optimal) === 1;
+
+    let p = 0.30; // 通常は30%で最善手
+    if (isImmediateWin) p = 0.85; // 即勝ちは高確率
+    else {
+      // 「勝ち形に入れる」なら少し上げる（※完全最善ではない＝強いとの差）
+      const nextRemain = remain - optimal;
+      if (nextRemain > 0 && losingPosition(nextRemain, state.m)) p = 0.65;
+    }
+
+    if (Math.random() < p) return optimal;
+    return randInt(1, maxTake);
+  }
+
+  function cpuMoveHard(remain) {
+    if (remain === 1) return 1;
+    return bestMove(remain, state.m);
+  }
+
+  function decideCpuTake() {
+    const remain = state.remain;
+    if (state.diff === "easy") return cpuMoveEasy(remain);
+    if (state.diff === "hard") return cpuMoveHard(remain);
+    return cpuMoveNormal(remain);
+  }
+
+  /** ====== Turn handling ====== **/
+  function applyMove(who, take) {
+    const before = state.remain;
+    const after = before - take;
+    state.remain = after;
+
+    const label = who === "player" ? "あなた" : "CPU";
+    logLine(`<span class="log-dim">${label}：</span> ${take} 個取った → 残り ${after} 個`, "log-line");
+
+    if (isGameOverByTaking(after)) {
+      // 取った側が「最後を取った」ので負け。勝者は逆。
+      const winner = (who === "player") ? "cpu" : "player";
+      logLine(`<span class="log-warn">最後の石を取ったのは「${label}」なので負けです。</span>`, "log-line");
+      finish(winner);
+      return true;
+    }
+
+    if (after < 0) {
+      // ここには入らない設計だが、保険
+      logLine(`<span class="log-lose">不正状態：石数が負になりました。</span>`, "log-line");
+      finish("cpu");
+      return true;
+    }
+
+    return false;
+  }
+
+  function nextTurn() {
+    if (!state.started || state.finished) return;
+
+    if (state.turn === "cpu") {
+      setBadge("CPUの番", "primary");
+      render();
+
+      // CPUが少し考えている感
+      window.setTimeout(() => {
+        if (state.finished) return;
+
+        const maxTake = legalMaxTake(state.remain);
+        let take = decideCpuTake();
+        take = clampInt(take, 1, maxTake) ?? 1;
+
+        const ended = applyMove("cpu", take);
+        if (!ended) {
+          state.turn = "player";
+          setBadge("あなたの番", "primary");
+          // プレイヤー入力範囲を更新
+          inpTake.min = "1";
+          inpTake.max = String(legalMaxTake(state.remain));
+          inpTake.value = "1";
+          render();
+        }
+      }, 500);
+
+    } else {
+      setBadge("あなたの番", "primary");
+      render();
+    }
+  }
+
+  /** ====== Events ====== **/
+  setupForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const n = clampInt(inpN.value, 1, 1000000);
+    const m = clampInt(inpM.value, 1, 1000000);
+    if (n == null || m == null) {
+      alert("N と M は 1以上の整数で入力してください。");
+      return;
+    }
+    if (m < 1) {
+      alert("M は 1以上にしてください。");
+      return;
+    }
+
+    state.n0 = n;
+    state.m = m;
+    state.remain = n;
+    state.diff = selDiff.value;
+    state.turn = turnCpu.checked ? "cpu" : "player";
+    state.started = true;
+    state.finished = false;
+
+    logBox.innerHTML = "";
+    logLine(`<span class="log-dim">開始：</span> N=${n}, M=${m}, 難易度=${selDiff.options[selDiff.selectedIndex].text}, 先行=${state.turn === "player" ? "あなた" : "CPU"}`, "log-line");
+
+    // 入力UI準備
+    inpTake.min = "1";
+    inpTake.max = String(legalMaxTake(state.remain));
+    inpTake.value = "1";
+
+    setBadge("進行中", "secondary");
+    render();
+    nextTurn();
+  });
+
+  btnTake.addEventListener("click", () => {
+    if (!state.started || state.finished) return;
+    if (state.turn !== "player") return;
+
+    const maxTake = legalMaxTake(state.remain);
+    const take = clampInt(inpTake.value, 1, maxTake);
+    if (take == null) {
+      alert(`取れる数は 1〜${maxTake} です。`);
+      return;
+    }
+
+    const ended = applyMove("player", take);
+    if (!ended) {
+      state.turn = "cpu";
+      render();
+      nextTurn();
+    }
+  });
+
+  // Enterでも「取る」
+  inpTake.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      btnTake.click();
+    }
+  });
+
+  btnReset.addEventListener("click", () => {
+    // 初期画面に戻す
+    state.started = false;
+    state.finished = false;
+    state.n0 = 0;
+    state.m = 0;
+    state.remain = 0;
+    state.diff = "normal";
+    state.turn = "player";
+
+    logBox.innerHTML = "";
+    setBadge("未開始", "light");
+    render();
+  });
+
+  btnClearLog.addEventListener("click", () => {
+    logBox.innerHTML = "";
+    if (state.started) {
+      logLine(`<span class="log-dim">ログを消去しました。</span>`, "log-line");
+    }
+  });
+
+  // initial
+  setBadge("未開始", "light");
+  render();
+})();
+</script>
+</body>
+</html>
