@@ -43,7 +43,7 @@
           </div>
         </div>
         <p class="text-secondary mt-2 mb-0">
-          1ターンで1〜M個まで石を取れます。残りが1個のときは必ず1個取り、取った側が負けになります。
+          1ターンで「1〜最大取得数」個まで石を取れます。残りが1個のときは必ず1個取り、取った側が負けになります。
         </p>
       </div>
 
@@ -56,17 +56,17 @@
           <div class="card-body">
             <form id="setup-form" class="row g-3">
               <div class="col-6">
-                <label class="form-label">石の数 N</label>
+                <label class="form-label">石の数</label>
                 <input id="inp-n" type="number" class="form-control" min="1" value="10" required>
                 <div class="form-text">1以上</div>
               </div>
               <div class="col-6">
-                <label class="form-label">最大取得数 M</label>
+                <label class="form-label">最大取得数</label>
                 <input id="inp-m" type="number" class="form-control" min="1" value="2" required>
                 <div class="form-text">1以上</div>
               </div>
               <div class="col-12">
-                <label class="form-label">難易度</label>
+                <label class="form-label">むずかしさ</label>
                 <select id="sel-diff" class="form-select">
                   <option value="easy" selected>弱い</option>
                   <option value="normal">普通</option>
@@ -81,8 +81,8 @@
                     <label class="form-check-label" for="turn-player">あなたが先行</label>
                   </div>
                   <div class="form-check">
-                    <input class="form-check-input" type="radio" name="turn" id="turn-cpu" value="cpu">
-                    <label class="form-check-label" for="turn-cpu">CPUが先行</label>
+                    <input class="form-check-input" type="radio" name="turn" id="turn-AI" value="AI">
+                    <label class="form-check-label" for="turn-AI">AIが先行</label>
                   </div>
                 </div>
               </div>
@@ -93,14 +93,40 @@
 
             <hr class="my-4">
 
-            <!-- <div class="small text-secondary">
-              <div class="fw-semibold mb-1">強い（最善手）の考え方</div>
-              <div>
-                残り石数を <span class="mono">k(M+1)+1</span> の形（例：M=2なら 1,4,7,10,...）に保つと、相手は必ず最後を取らされやすい（ミゼール型の必勝形）。
-              </div>
-            </div> -->
+            <!-- 強いの説明は削除済み（ユーザー側変更を尊重） -->
           </div>
         </div>
+
+        <!-- 対戦履歴（追加） -->
+        <div class="card shadow-sm mt-4">
+          <div class="card-header bg-white d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">対戦履歴（端末に保存：100件まで）</div>
+            <button id="btn-clear-history" class="btn btn-outline-danger btn-sm" type="button">履歴を全削除</button>
+          </div>
+          <div class="card-body">
+            <div class="text-secondary small mb-2">
+              ブラウザの localStorage に保存されます（同じ端末・同じブラウザで有効）。
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th style="min-width: 140px;">日時</th>
+                    <th>石の数/最大取得数</th>
+                    <th>むずかしさ</th>
+                    <th>先行</th>
+                    <th>結果</th>
+                    <th class="text-end">手数</th>
+                  </tr>
+                </thead>
+                <tbody id="history-tbody">
+                  <tr><td colspan="6" class="text-secondary">履歴はまだありません。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Game -->
@@ -123,7 +149,7 @@
                   </div>
                   <div class="text-end">
                     <div class="text-secondary small">ルール</div>
-                    <div class="mono small mb-0">1〜M 個 / 最後を取ると負け</div>
+                    <div class="mono small mb-0">「 1〜最大取得数」 個 / 最後を取ると負け</div>
                   </div>
                 </div>
                 <div class="progress mt-2" role="progressbar" aria-label="remaining">
@@ -155,7 +181,7 @@
             </div>
           </div>
           <div class="card-footer bg-white text-secondary small">
-            入力制約：1〜M、ただし残りが1のときは強制的に1を取って負けになります。
+            入力制約：1〜最大取得数、ただし残りが1のときは強制的に1を取って負けになります。
           </div>
         </div>
       </div>
@@ -164,6 +190,88 @@
 
 <script>
 (() => {
+  /** ====== LocalStorage (History) ====== **/
+  const HISTORY_KEY = "stone_game_history_v1";
+  const HISTORY_LIMIT = 100;
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (!raw) return [];
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) return [];
+      return data;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(list) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+    } catch {
+      // 保存不可（容量/設定など）でもゲーム自体は継続
+    }
+  }
+
+  function addHistory(entry) {
+    const list = loadHistory();
+    list.unshift(entry);
+    if (list.length > HISTORY_LIMIT) list.length = HISTORY_LIMIT;
+    saveHistory(list);
+  }
+
+  function clearHistory() {
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {}
+  }
+
+  function fmtDateTime(ts) {
+    // 例: 2026/01/20 12:34:56
+    const d = new Date(ts);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function diffLabel(v) {
+    if (v === "easy") return "弱い";
+    if (v === "normal") return "普通";
+    return "強い";
+  }
+
+  function renderHistory() {
+    const tbody = document.getElementById("history-tbody");
+    const list = loadHistory();
+
+    if (!tbody) return;
+
+    if (list.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-secondary">履歴はまだありません。</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = list.map((h) => {
+      const winText = h.winner === "player" ? "あなたの勝ち" : "AIの勝ち";
+      const winBadge = h.winner === "player"
+        ? `<span class="badge text-bg-success">あなた</span>`
+        : `<span class="badge text-bg-danger">AI</span>`;
+
+      const firstText = h.first === "player" ? "あなた" : "AI";
+
+      return `
+        <tr>
+          <td class="mono small">${fmtDateTime(h.ts)}</td>
+          <td class="mono">${h.n}/${h.m}</td>
+          <td>${diffLabel(h.diff)}</td>
+          <td>${firstText}</td>
+          <td>${winBadge} <span class="text-secondary small ms-1">${winText}</span></td>
+          <td class="text-end mono">${h.turns ?? "-"}</td>
+        </tr>
+      `;
+    }).join("");
+  }
+
   /** ====== State ====== **/
   const state = {
     started: false,
@@ -172,7 +280,14 @@
     m: 0,
     remain: 0,
     diff: "normal", // easy | normal | hard
-    turn: "player", // player | cpu
+    turn: "player", // player | AI
+
+    // 追加：履歴用の集計
+    startedAt: 0,
+    first: "player",
+    turns: 0,          // 手番数（プレイヤー/AIの行動回数）
+    playerTaken: 0,    // あなたが取った合計
+    AITaken: 0,       // AIが取った合計
   };
 
   /** ====== DOM ====== **/
@@ -183,7 +298,7 @@
   const inpM = $("inp-m");
   const selDiff = $("sel-diff");
   const turnPlayer = $("turn-player");
-  const turnCpu = $("turn-cpu");
+  const turnAI = $("turn-AI");
 
   const badgeState = $("badge-state");
   const txtRemain = $("txt-remain");
@@ -196,6 +311,8 @@
   const btnReset = $("btn-reset");
   const btnClearLog = $("btn-clear-log");
   const logBox = $("log");
+
+  const btnClearHistory = $("btn-clear-history");
 
   /** ====== Helpers ====== **/
   function logLine(html, cls = "log-line") {
@@ -246,10 +363,6 @@
   }
 
   function legalMaxTake(remain) {
-    // ルール上は1..M。ただし remain=1 のときは 1 を取るしかない（そして負け）。
-    // remain>1 のときは「最後を取って負け」なので、取れる最大は min(M, remain-1) にしても良いが、
-    // 実際の説明では「最大M個」としか書いていないので、remain<=M のときに全部取って負けも許可する。
-    // ここでは「全部取るのもルール上は可能で、その瞬間に負け」として扱う。
     return Math.min(state.m, remain);
   }
 
@@ -262,12 +375,28 @@
     state.finished = true;
     state.started = true;
 
+    // ====== 履歴保存（追加） ======
+    // winner: "player" | "AI"
+    addHistory({
+      ts: Date.now(),
+      n: state.n0,
+      m: state.m,
+      diff: state.diff,
+      first: state.first,
+      winner,
+      turns: state.turns,
+      playerTaken: state.playerTaken,
+      AITaken: state.AITaken,
+    });
+    renderHistory();
+    // ============================
+
     if (winner === "player") {
       setBadge("あなたの勝ち", "success");
       logLine(`<span class="log-win">結果：あなたの勝ち</span>`, "log-line");
     } else {
-      setBadge("CPUの勝ち", "danger");
-      logLine(`<span class="log-lose">結果：CPUの勝ち</span>`, "log-line");
+      setBadge("AIの勝ち", "danger");
+      logLine(`<span class="log-lose">結果：AIの勝ち</span>`, "log-line");
     }
     render();
   }
@@ -280,14 +409,10 @@
   }
 
   function bestMove(remain, m) {
-    // 最善手：相手に remain ≡ 1 (mod m+1) を渡す
-    // ただし、すでに負け形（remain ≡ 1）なら勝てる手は無いので、適当（1〜min(m,remain)）に取る
     const maxTake = Math.min(m, remain);
     if (remain === 1) return 1; // 強制負け手
     const r = (remain - 1) % (m + 1); // 0..m
-    // r==0 なら今が負け形なので「必勝手なし」
     if (r === 0) {
-      // 負け形では、ランダムでもよいが、取り過ぎて即負けしないように（ただし全部取って負けも許容）
       return Math.min(1, maxTake) || 1;
     }
     return Math.max(1, Math.min(r, maxTake));
@@ -297,30 +422,24 @@
     return lo + Math.floor(Math.random() * (hi - lo + 1));
   }
 
-  function cpuMoveEasy(remain) {
+  function AIMoveEasy(remain) {
     const maxTake = legalMaxTake(remain);
     if (remain === 1) return 1;
-    // 基本ランダム（勝てる手があっても選ばないことが多い）
-    // ただし「即勝ち（相手に1を渡す）」が見えるときでも一定確率で外す
-    const canLeave1 = (remain - 1) >= 1 && (remain - 1) <= state.m; // 1〜M 取って1残し可能
-    if (canLeave1 && Math.random() < 0.25) return remain - 1; // 25%だけ確実に狙う
+    const canLeave1 = (remain - 1) >= 1 && (remain - 1) <= state.m;
+    if (canLeave1 && Math.random() < 0.25) return remain - 1;
     return randInt(1, maxTake);
   }
 
-  function cpuMoveNormal(remain) {
+  function AIMoveNormal(remain) {
     const maxTake = legalMaxTake(remain);
     if (remain === 1) return 1;
 
-    // 基本ランダム。ただし勝ち筋（理論上の有利手）があるときは狙う確率を上げる。
     const optimal = bestMove(remain, state.m);
-
-    // 「すぐ勝てる（1を渡せる）」は強めに狙う
     const isImmediateWin = (remain - optimal) === 1;
 
-    let p = 0.30; // 通常は30%で最善手
-    if (isImmediateWin) p = 0.85; // 即勝ちは高確率
+    let p = 0.30;
+    if (isImmediateWin) p = 0.85;
     else {
-      // 「勝ち形に入れる」なら少し上げる（※完全最善ではない＝強いとの差）
       const nextRemain = remain - optimal;
       if (nextRemain > 0 && losingPosition(nextRemain, state.m)) p = 0.65;
     }
@@ -329,16 +448,16 @@
     return randInt(1, maxTake);
   }
 
-  function cpuMoveHard(remain) {
+  function AIMoveHard(remain) {
     if (remain === 1) return 1;
     return bestMove(remain, state.m);
   }
 
-  function decideCpuTake() {
+  function decideAITake() {
     const remain = state.remain;
-    if (state.diff === "easy") return cpuMoveEasy(remain);
-    if (state.diff === "hard") return cpuMoveHard(remain);
-    return cpuMoveNormal(remain);
+    if (state.diff === "easy") return AIMoveEasy(remain);
+    if (state.diff === "hard") return AIMoveHard(remain);
+    return AIMoveNormal(remain);
   }
 
   /** ====== Turn handling ====== **/
@@ -347,21 +466,25 @@
     const after = before - take;
     state.remain = after;
 
-    const label = who === "player" ? "あなた" : "CPU";
+    // ====== 履歴用集計（追加） ======
+    state.turns += 1;
+    if (who === "player") state.playerTaken += take;
+    else state.AITaken += take;
+    // ==============================
+
+    const label = who === "player" ? "あなた" : "AI";
     logLine(`<span class="log-dim">${label}：</span> ${take} 個取った → 残り ${after} 個`, "log-line");
 
     if (isGameOverByTaking(after)) {
-      // 取った側が「最後を取った」ので負け。勝者は逆。
-      const winner = (who === "player") ? "cpu" : "player";
+      const winner = (who === "player") ? "AI" : "player";
       logLine(`<span class="log-warn">最後の石を取ったのは「${label}」なので負けです。</span>`, "log-line");
       finish(winner);
       return true;
     }
 
     if (after < 0) {
-      // ここには入らない設計だが、保険
       logLine(`<span class="log-lose">不正状態：石数が負になりました。</span>`, "log-line");
-      finish("cpu");
+      finish("AI");
       return true;
     }
 
@@ -371,23 +494,21 @@
   function nextTurn() {
     if (!state.started || state.finished) return;
 
-    if (state.turn === "cpu") {
-      setBadge("CPUの番", "primary");
+    if (state.turn === "AI") {
+      setBadge("AIの番", "primary");
       render();
 
-      // CPUが少し考えている感
       window.setTimeout(() => {
         if (state.finished) return;
 
         const maxTake = legalMaxTake(state.remain);
-        let take = decideCpuTake();
+        let take = decideAITake();
         take = clampInt(take, 1, maxTake) ?? 1;
 
-        const ended = applyMove("cpu", take);
+        const ended = applyMove("AI", take);
         if (!ended) {
           state.turn = "player";
           setBadge("あなたの番", "primary");
-          // プレイヤー入力範囲を更新
           inpTake.min = "1";
           inpTake.max = String(legalMaxTake(state.remain));
           inpTake.value = "1";
@@ -420,14 +541,21 @@
     state.m = m;
     state.remain = n;
     state.diff = selDiff.value;
-    state.turn = turnCpu.checked ? "cpu" : "player";
+    state.turn = turnAI.checked ? "AI" : "player";
     state.started = true;
     state.finished = false;
 
-    logBox.innerHTML = "";
-    logLine(`<span class="log-dim">開始：</span> N=${n}, M=${m}, 難易度=${selDiff.options[selDiff.selectedIndex].text}, 先行=${state.turn === "player" ? "あなた" : "CPU"}`, "log-line");
+    // ====== 履歴用初期化（追加） ======
+    state.startedAt = Date.now();
+    state.first = state.turn;   // 開始時の手番が先行
+    state.turns = 0;
+    state.playerTaken = 0;
+    state.AITaken = 0;
+    // ==============================
 
-    // 入力UI準備
+    logBox.innerHTML = "";
+    logLine(`<span class="log-dim">開始：</span> N=${n}, M=${m}, むずかしさ=${selDiff.options[selDiff.selectedIndex].text}, 先行=${state.turn === "player" ? "あなた" : "AI"}`, "log-line");
+
     inpTake.min = "1";
     inpTake.max = String(legalMaxTake(state.remain));
     inpTake.value = "1";
@@ -450,13 +578,12 @@
 
     const ended = applyMove("player", take);
     if (!ended) {
-      state.turn = "cpu";
+      state.turn = "AI";
       render();
       nextTurn();
     }
   });
 
-  // Enterでも「取る」
   inpTake.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -465,7 +592,6 @@
   });
 
   btnReset.addEventListener("click", () => {
-    // 初期画面に戻す
     state.started = false;
     state.finished = false;
     state.n0 = 0;
@@ -473,6 +599,13 @@
     state.remain = 0;
     state.diff = "normal";
     state.turn = "player";
+
+    // 履歴用もクリア（ただし保存履歴は消さない）
+    state.startedAt = 0;
+    state.first = "player";
+    state.turns = 0;
+    state.playerTaken = 0;
+    state.AITaken = 0;
 
     logBox.innerHTML = "";
     setBadge("未開始", "light");
@@ -486,9 +619,17 @@
     }
   });
 
+  // 履歴全削除（追加）
+  btnClearHistory.addEventListener("click", () => {
+    if (!confirm("保存されている対戦履歴をすべて削除します。よろしいですか？")) return;
+    clearHistory();
+    renderHistory();
+  });
+
   // initial
   setBadge("未開始", "light");
   render();
+  renderHistory(); // 起動時に履歴を表示（追加）
 })();
 </script>
 </body>
